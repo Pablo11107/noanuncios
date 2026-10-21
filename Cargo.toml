@@ -1,7 +1,0 @@
-[workspace]
-resolver = "2"
-members = [
-    "pdfcleaner_rs",
-    "pdfcleaner_python",
-    "pdfcleaner_wasm"
-]
