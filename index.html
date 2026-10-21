@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Cleaner · Quita los anuncios de tus PDF</title>
+<!--
+  Motor de limpieza: paquete npm "gulagcleaner_wasm" v0.16.4 (GPL-3.0),
+  del proyecto original https://github.com/YM162/gulagcleaner
+  Esta página es una interfaz sencilla que lo carga desde jsDelivr.
+-->
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1c1f24; --muted: #5f6672;
+    --line: #d9dde3; --accent: #2563eb; --ok: #15803d; --err: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141a; --card: #1b1e26; --text: #eceef2; --muted: #9aa3b2;
+      --line: #2e3340; --accent: #6ea0ff; --ok: #4ade80; --err: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 20px 64px; }
+  h1 { margin: 0 0 8px; font-size: 2rem; }
+  .sub { margin: 0 0 28px; color: var(--muted); }
+  #drop {
+    display: block; padding: 40px 20px; text-align: center; cursor: pointer;
+    background: var(--card); border: 2px dashed var(--line); border-radius: 14px;
+    transition: border-color .15s, background .15s;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); }
+  #drop strong { display: block; font-size: 1.1rem; margin-bottom: 4px; }
+  #drop span { color: var(--muted); font-size: .95rem; }
+  ul { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 10px; }
+  li {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .info { min-width: 0; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .status { font-size: .88rem; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  a.dl {
+    flex: none; text-decoration: none; font-weight: 600; font-size: .92rem;
+    color: #fff; background: var(--accent); padding: 8px 14px; border-radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) { a.dl { color: #0b1020; } }
+  footer { margin-top: 36px; font-size: .85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>PDF Cleaner</h1>
+  <p class="sub">Quita los anuncios de tus PDF. Todo se hace en tu navegador: los archivos no se suben a ningún servidor.</p>
+
+  <label id="drop" for="file">
+    <strong>Elige tus PDF o arrástralos aquí</strong>
+    <span>Puedes seleccionar varios a la vez</span>
+    <input id="file" type="file" accept="application/pdf,.pdf" multiple hidden>
+  </label>
+
+  <ul id="list"></ul>
+
+  <footer>Los PDF limpios se descargan con el sufijo «-sin-anuncios».</footer>
+</main>
+
+<script type="module">
+  const ENGINE = 'https://cdn.jsdelivr.net/npm/gulagcleaner_wasm@0.16.4/gulagcleaner_wasm.js';
+
+  const input = document.getElementById('file');
+  const drop  = document.getElementById('drop');
+  const list  = document.getElementById('list');
+
+  let enginePromise = null;
+  function loadEngine() {
+    if (!enginePromise) {
+      enginePromise = import(ENGINE).then(async (mod) => {
+        await mod.default();          // inicializa el WASM
+        return mod.clean_pdf;
+      });
+    }
+    return enginePromise;
+  }
+
+  const wait = () => new Promise((r) => setTimeout(r, 30));
+  const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
+
+  function outName(name) {
+    return name.replace(/^wuolah-(free|premium)-/, '').replace(/\.pdf$/i, '') + '-sin-anuncios.pdf';
+  }
+
+  function addRow(name) {
+    const li = document.createElement('li');
+    const info = document.createElement('div'); info.className = 'info';
+    const n = document.createElement('div');    n.className = 'name'; n.textContent = name;
+    const s = document.createElement('div');    s.className = 'status'; s.textContent = 'Procesando…';
+    info.append(n, s); li.append(info); list.append(li);
+    return { li, status: s };
+  }
+
+  async function handle(files) {
+    const pdfs = [...files].filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    if (!pdfs.length) return;
+
+    let clean;
+    try {
+      clean = await loadEngine();
+    } catch (e) {
+      console.error(e);
+      const row = addRow('No se pudo cargar el motor');
+      row.status.className = 'status err';
+      row.status.textContent = 'Revisa tu conexión a internet y recarga la página.';
+      enginePromise = null;
+      return;
+    }
+
+    for (const file of pdfs) {
+      const row = addRow(file.name);
+      await wait(); // deja que el navegador pinte la fila antes de trabajar
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let out;
+        try { out = clean(bytes, false); }
+        catch (_) { out = clean(bytes, true); }   // método alternativo
+
+        const blob = new Blob([out], { type: 'application/pdf' });
+        const a = document.createElement('a');
+        a.className = 'dl';
+        a.textContent = 'Descargar';
+        a.href = URL.createObjectURL(blob);
+        a.download = outName(file.name);
+        row.li.append(a);
+        row.status.className = 'status ok';
+        row.status.textContent = 'Listo · ' + kb(file.size) + ' → ' + kb(blob.size);
+      } catch (e) {
+        console.error(e);
+        row.status.className = 'status err';
+        row.status.textContent = 'No se pudo limpiar este PDF.';
+      }
+    }
+  }
+
+  input.addEventListener('change', () => { handle(input.files); input.value = ''; });
+  ['dragenter', 'dragover'].forEach((ev) =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => handle(e.dataTransfer.files));
+</script>
+</body>
+</html>
